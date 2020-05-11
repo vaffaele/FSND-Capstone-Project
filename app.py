@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+import os
+from flask import Flask, request, abort, jsonify, render_template, redirect
+from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
+from models import setup_db, Actor, Movie
+from flask_migrate import Migrate
+from auth.auth import AuthError, requires_auth
+from functools import wraps
+import json
+from os import environ as env
+from werkzeug.exceptions import HTTPException
+from flask import session
+from flask import url_for
+from authlib.integrations.flask_client import OAuth
+from six.moves.urllib.parse import urlencode
+from flask_cors import cross_origin
+from dotenv import load_dotenv, find_dotenv
+
+
+def create_app(test_config=None):
+    app = Flask(__name__)
+    app.secret_key = 'mysecret'
+    setup_db(app)
+    CORS(app)
+
+    return app
+
+app = create_app()
+
+
+oauth = OAuth(app)
+
+auth0 = oauth.register(
+    'auth0',
+    client_id='0fi6Tzl1S7GYMks7a3bCXVosXu49V1N8',
+    client_secret='cC-Ta5v-SdfyJezX6qNQBxNeFtltvqsnjKiDZWGV1r1EGlwz5uRMVN-sjK2eTHbK',
+    api_base_url='https://dev-mee40p9i.eu.auth0.com',
+    access_token_url='https://dev-mee40p9i.eu.auth0.com/oauth/token',
+    authorize_url='https://dev-mee40p9i.eu.auth0.com/authorize',
+    token_placement='headers',
+    client_kwargs={
+        'scope': 'openid profile email',
+    },
+)
+
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Headers',
+                         'Content-Type,Authorization,true')
+    response.headers.add('Access-Control-Allow-Methods',
+                         'GET,PATCH,PUT,POST,DELETE,OPTIONS')
+    return response
+'''
+<----------FrontEnd---------------------------->
+'''
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return render_template('home.html')
+
+
+@app.route('/create', methods=['GET'])
+def create_actor_profile():
+
+    return render_template('index.html')
+
+
+@app.route('/create-movie', methods=['GET'])
+def create_movie_profile():
+
+    return render_template('create_movie.html')
+
+
+@app.route('/profile/<int:actor_id>', methods=['GET'])
+def get_actor_profile(actor_id):
+    return render_template('profile.html')
+
+
+@app.route('/profile-movie/<int:movie_id>', methods=['GET'])
+def get_movie_profile(movie_id):
+    return render_template('film_profile.html')
+
+
+@app.route('/dashboard')
+def dashboard():
+    return render_template('dashboard.html')
+
+
+@app.route('/callback')
+def callback_handling():
+
+    return redirect('/dashboard')
+
+
+@app.route('/login')
+def login():
+    return auth0.
+    authorize_redirect(redirect_uri='http://localhost:8080/callback')
+
+
+@app.route('/logout')
+def logout():
+    # Clear session stored data
+    session.clear()
+    # Redirect user to logout endpoint
+    params = {'returnTo': url_for('index', _external=True),
+              'client_id': '0fi6Tzl1S7GYMks7a3bCXVosXu49V1N8'}
+    return redirect(auth0.api_base_url + '/v2/logout?' + urlencode(params))
+
+'''
+<-------------API EndPoints------------------------->
+'''
+
+
+@app.route('/actors/<int:actor_id>', methods=['GET'])
+@requires_auth('get:actor-detail')
+def get_actor(payload, actor_id):
+
+    actor = Actor.query.get(actor_id)
+    return jsonify({'first_name': actor.first_name,
+                    'last_name': actor.last_name,
+                    'age': actor.age,
+                    'gender': actor.gender,
+                    'image_link': actor.image_link})
+
+
+@app.route('/actors/<int:actor_id>', methods=['DELETE'])
+@requires_auth('delete:actor')
+def delete_actor(payload, actor_id):
+
+    actor = Actor.query.get(actor_id)
+    actor.delete()
+    return jsonify({'success': True,
+                    'deleted': actor.id})
+
+
+@app.route('/actors', methods=['GET'])
+@requires_auth('get:actor')
+def get_actors(payload):
+
+    actors = Actor.query.all()
+    data = []
+    for actor in actors:
+        temp = {'id': actor.id,
+                'first_name': actor.first_name,
+                'last_name': actor.last_name,
+                'age': actor.age,
+                'gender': actor.gender,
+                'image_link': actor.image_link}
+        data.append(temp)
+    return jsonify({'success': True,
+                    'actors': data})
+
+
+@app.route('/actors', methods=['POST'])
+@requires_auth('post:actor')
+def create_actor(payload):
+    req = request.get_json()
+    try:
+        first_name = req['first_name']
+        last_name = req['last_name']
+        age = int(req['age'])
+        gender = req['gender']
+        image_link = req['image_link']
+        if first_name is None or last_name is None:
+            abort(400)
+        new_actor = Actor(first_name=first_name, last_name=last_name,
+                          age=age, gender=gender, image_link=image_link)
+        Actor.insert(new_actor)
+        new_id = new_actor.id
+        return jsonify({'success': True,
+                        'actors': new_id})
+    except:
+        abort(422)
+
+
+@app.route('/actors/<int:actor_id>', methods=['PATCH'])
+@requires_auth('patch:actor')
+def edit_actor(payload, actor_id):
+    req = request.get_json()
+    actor = Actor.query.get(actor_id)
+
+    try:
+        req_first_name = req['first_name']
+        if req_first_name is not None:
+            actor.first_name = req_first_name
+        req_last_name = req['last_name']
+        if req_last_name is not None:
+            actor.last_name = req_last_name
+        req_age = req['age']
+        if req_age is not None:
+            actor.age = int(req_age)
+        req_gender = req['gender']
+        if req_gender is not None:
+            actor.gender = req_gender
+        req_link = req['image_link']
+        if req_link is not None:
+            actor.image_link = req_link
+        actor.update()
+
+    except BaseException:
+        abort(400)
+    return jsonify({'success': True,
+                    'actors': actor.id})
+
+
+@app.route('/movies', methods=['GET'])
+@requires_auth('get:movie')
+def get_movies(payload):
+    movies = Movie.query.all()
+    data = []
+    for movie in movies:
+        temp = {'id': movie.id,
+                'title': movie.title,
+                'release_date': movie.release_date}
+        data.append(temp)
+
+    return jsonify({'success': True,
+                    'movies': data})
+
+
+@app.route('/movies', methods=['POST'])
+@requires_auth('post:movie')
+def create_movie(payload):
+    req = request.get_json()
+
+    try:
+        title = req['title']
+        release_date = req['release_date']
+        image_link = req['image_link']
+        if title is None or release_date is None or image_link is None:
+            abort(400)
+        new_movie = Movie(title=title, release_date=release_date,
+                          image_link=image_link)
+        Movie.insert(new_movie)
+        new_id = new_movie.id
+        return jsonify({'success': True,
+                        'movies': new_id})
+    except:
+        abort(422)
+
+
+@app.route('/movies/<int:movie_id>', methods=['GET'])
+@requires_auth('get:movie-detail')
+def get_movie(payload, movie_id):
+
+    movie = Movie.query.get(movie_id)
+    return jsonify({'title': movie.title,
+                    'release_date': movie.release_date,
+                    'image_link': movie.image_link})
+
+
+@app.route('/movies/<int:movie_id>', methods=['DELETE'])
+@requires_auth('delete:movie')
+def delete_movie(payload, movie_id):
+
+    movie = Movie.query.get(movie_id)
+    movie.delete()
+    return jsonify({'success': True,
+                    'deleted': movie.id})
+
+
+@app.route('/movies/<int:movie_id>', methods=['PATCH'])
+@requires_auth('patch:movie')
+def edit_movie(payload, movie_id):
+    req = request.get_json()
+    movie = Movie.query.get(movie_id)
+
+    try:
+        req_title = req['title']
+        if req_title is not None:
+            movie.title = req_title
+        req_date = req['release_date']
+        if req_date is not None:
+            movie.release_date = req_date
+        req_link = req['image_link']
+        if req_link is not None:
+            movie.image_link = req_link
+
+        movie.update()
+
+    except BaseException:
+        abort(400)
+    return jsonify({'success': True,
+                    'actors': movie.id})
+
+'''
+Example error handling for unprocessable entity
+'''
+
+
+@app.errorhandler(422)
+def unprocessable(error):
+        return jsonify({
+            "success": False,
+            "error": 422,
+            "message": "unprocessable"
+        }), 422
+
+'''
+@TODO implement error handlers using the @app.errorhandler(error) decorator
+        each error handler should return (with approprate messages):
+                jsonify({
+                        "success": False,
+                        "error": 404,
+                        "message": "resource not found"
+                        }), 404
+'''
+
+
+@app.errorhandler(400)
+def bad_request(error):
+        return jsonify({
+            "success": False,
+            "error": 400,
+            "message": "bad request"
+        }), 400
+
+'''
+    @TODO implement error handler for 404
+        error handler should conform to general task above
+'''
+
+
+@app.errorhandler(404)
+def not_found(error):
+        return jsonify({
+            "success": False,
+            "error": 404,
+            "message": "resource not found"
+        }), 404
+
+'''
+    @TODO implement error handler for AuthError
+        error handler should conform to general task above
+'''
+
+
+@app.errorhandler(AuthError)
+def auth_error(error):
+        return jsonify({
+            "message": error.error
+        }), error.status_code
+
+
+if __name__ == '__main__':
+    APP.run(host='0.0.0.0', port=8080, debug=True)
