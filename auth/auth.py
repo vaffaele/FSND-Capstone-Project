@@ -8,9 +8,9 @@ from flask import url_for
 from flask_cors import cross_origin
 
 
-AUTH0_DOMAIN = 'dev-mee40p9i.eu.auth0.com'
-ALGORITHMS = ['RS256']
-API_AUDIENCE = 'http://127.0.0.1:5000/drinks'
+AUTH0_DOMAIN = os.environ['AUTH0_DOMAIN']
+ALGORITHMS = os.environ['ALGORITHMS']
+API_AUDIENCE = os.environ['API_AUDIENCE']
 
 # AuthError Exception
 '''
